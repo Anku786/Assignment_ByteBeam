@@ -18,8 +18,7 @@ export const FleetDataProvider = ({ children }) => {
 
     const refresh = useCallback(async () => {
         const [vehicles, info] = await Promise.all([
-            fleetDb.listVehicles(),
-            fleetDb.getStorageInfo(),
+            fleetDb.listVehicles()
         ]);
         setDbRows(vehicles);
         setStorage(info);

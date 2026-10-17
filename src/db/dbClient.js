@@ -44,7 +44,6 @@ export const fleetDb = {
     listVehicles: () => call('listVehicles'),
     getTelemetryHistory: (opts) => call('getTelemetryHistory', opts),
     getIngestionStats: () => call('getIngestionStats'),
-    getStorageInfo: () => call('getStorageInfo'),
 
     async upsertVehicles(vehicles) {
         const res = await call('upsertVehicles', vehicles);
