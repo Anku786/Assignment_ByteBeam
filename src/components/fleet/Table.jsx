@@ -17,21 +17,107 @@ const fmt = (v, digits = 0) => (v == null ? '—' : `${v.toFixed(digits)}`);
 // Thresholds are examples; tune them to your fleet.
 const getAlerts = (row) => {
     const alerts = [];
-    const l = row.latest;
-    if (row.connection === 'offline') alerts.push({ level: 'issue', text: 'Offline' });
-    else if (row.connection === 'stale') alerts.push({ level: 'issue', text: 'Stale data' });
-    if (l) {
-        if (l.fuel != null && l.fuel < 25) alerts.push({ level: 'crit', text: 'Low fuel' });
-        if (l.battery != null && l.battery < 35) alerts.push({ level: 'crit', text: 'Low battery' });
-        if (l.engineTemp != null && l.engineTemp > 90) alerts.push({ level: 'crit', text: 'Engine hot' });
+    const l = row;
+
+    // Connection status
+    if (row.connection === 'offline') {
+        alerts.push({
+            level: 'crit',
+            text: 'Offline',
+        });
+    } else if (
+        row.connection === 'stale' ||
+        (
+            l.received_at != null &&
+            Date.now() - Number(l.received_at) > 2 * 60 * 1000
+        )
+    ) {
+        alerts.push({
+            level: 'warn',
+            text: 'Stale data',
+        });
     }
+
+    if (!l) return alerts;
+
+    const battery = l.battery;
+    const fuel = l.fuel;
+    const engineTemp = l.engineTemp ?? l.engine_temp;
+
+    // Determine vehicle type
+    let vehicleType = row.type ?? l.type;
+
+    if (!vehicleType && row.data) {
+        try {
+            const data = typeof row.data === 'string'
+                ? JSON.parse(row.data)
+                : row.data;
+
+            vehicleType = data.type;
+        } catch {
+            // Ignore malformed vehicle metadata.
+        }
+    }
+
+    // Battery alerts
+    if (battery != null && battery < 10) {
+        alerts.push({
+            level: 'crit',
+            text: 'Critical battery',
+        });
+    } else if (battery != null && battery < 20) {
+        alerts.push({
+            level: 'warn',
+            text: 'Low battery',
+        });
+    }
+
+    // Fuel alerts: skip EVs
+    if (vehicleType !== 'EV' && fuel != null && fuel < 5) {
+        alerts.push({
+            level: 'crit',
+            text: 'Critical fuel',
+        });
+    } else if (
+        vehicleType !== 'EV' &&
+        fuel != null &&
+        fuel < 20
+    ) {
+        alerts.push({
+            level: 'warn',
+            text: 'Low fuel',
+        });
+    }
+
+    // Engine temperature alerts
+    if (engineTemp != null && engineTemp >= 110) {
+        alerts.push({
+            level: 'crit',
+            text: 'Engine temperature critical',
+        });
+    } else if (engineTemp != null && engineTemp >= 100) {
+        alerts.push({
+            level: 'warn',
+            text: 'High engine temperature',
+        });
+    }
+
     return alerts;
 };
 
-const getHealth = (row, alerts) => {
-    if (!row.latest) return '—';
-    if (alerts.some((a) => a.level === 'crit')) return 'Critical';
-    if (alerts.length) return 'Warning';
+const getHealth = (row) => {
+    if (!row) return 'Unknown';
+
+    const alerts = getAlerts(row);
+
+    if (alerts.some((alert) => alert.level === 'crit')) {
+        return 'Critical';
+    }
+
+    if (alerts.length > 0) {
+        return 'Warning';
+    }
+
     return 'Good';
 };
 
@@ -53,38 +139,36 @@ const Table = () => {
 
     const columns = [
         {
-            key: 'name',
+            key: 'id',
             header: 'Vehicle ID / Name',
-            render: (row) => `${row.id} / ${row.name ?? '—'}`,
         },
         {
             key: 'battery',
             header: 'Battery %',
-            render: (row) => (row.latest ? `${fmt(row.latest.battery)}%` : '—'),
+            render: (row) => (<div className={`battery ${row.battery > 70 ? "green" : row.battery < 10 ? "red" : "amber"}`}><span className="battery-track"><span style={{ width: `${row.battery}%` }}></span></span><b>{row.battery}%</b></div>),
         },
         {
             key: 'health',
             header: 'Health',
-            render: (row) => getHealth(row, getAlerts(row)),
+            render: (row) => getHealth(row),
         },
         {
             key: 'ignition',
             header: 'Ignition',
-            // Derived: moving => on. Replace if you ingest a real ignition signal.
             render: (row) =>
-                row.latest?.speed == null ? '—' : row.latest.speed > 0 ? 'On' : 'Off',
+                row?.speed == null ? '—' : row.speed > 0 ? 'On' : 'Off',
         },
         {
             key: 'fuel',
             header: 'Fuel',
-            render: (row) => (row.latest?.fuel == null ? '—' : `${Math.round(row.latest.fuel)}%`),
+            render: (row) => (row?.fuel == null ? '—' : `${Math.round(row.fuel)}%`),
         },
         {
             key: 'freshness',
             header: 'Freshness',
             render: (row) =>
-                row.latest
-                    ? `${row.connection} · ${formatAge(Date.now() - row.latest.lastReceived)}`
+                row.telemetry_ts
+                    ? `${formatAge(Date.now() - row.telemetry_ts)}`
                     : 'No data',
         },
         {

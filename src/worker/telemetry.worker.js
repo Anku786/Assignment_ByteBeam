@@ -263,11 +263,6 @@ async function initDatabase() {
 
                 mode = 'opfs';
             } catch (error) {
-                console.warn(
-                    '[DB] OPFS unavailable, using IndexedDB fallback',
-                    error
-                );
-
                 try {
                     await db.terminate();
                 } catch {
@@ -579,6 +574,7 @@ const repository = {
     seedVehicles,
     ingestTelemetry,
     listVehicles,
+    clearData
 };
 
 
@@ -629,3 +625,10 @@ self.onmessage = (event) => {
         }
     });
 };
+
+async function clearData() {
+    await exec('DELETE FROM telemetry');
+    await persist();
+
+    return { success: true };
+}

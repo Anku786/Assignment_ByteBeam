@@ -44,6 +44,7 @@ export const fleetDb = {
     listVehicles: () => call('listVehicles'),
     getTelemetryHistory: (opts) => call('getTelemetryHistory', opts),
     getIngestionStats: () => call('getIngestionStats'),
+    clearData: () => call("clearData"),
 
     async upsertVehicles(vehicles) {
         const res = await call('upsertVehicles', vehicles);
@@ -54,10 +55,6 @@ export const fleetDb = {
     // Resolves AFTER the packets are committed and durable.
     // Returns { received, inserted, duplicates, rejected }.
     async ingestTelemetry(records) {
-        console.log('[DB] ingestTelemetry called', {
-            count: records?.length,
-            first: records?.[0],
-        });
         const res = await call('ingestTelemetry', records);
         if (res.inserted > 0) notify(); // pure duplicates change nothing, so no refresh
         return res;
