@@ -1,3 +1,5 @@
+import Table from "./Table";
+
 const FleetOverview = () => {
     return (
         <section className="content">
@@ -7,9 +9,7 @@ const FleetOverview = () => {
                     <div><h1>Fleet Overview</h1><div className="page-sub">Real-time summary of your fleet operations</div></div>
                 </div>
             </div>
-            {/* <FleetStats rows={rows} openCount={openAttention.filter((item) => item.status === 'open').length} />
-            <FleetChart />
-            <DataTable columns={columns} rows={rows} onRowClick={(row) => navigate(`/vehicles/${row.id}`)} /> */}
+            <Table />
         </section>
     )
 }

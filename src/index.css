@@ -2089,8 +2089,20 @@ tbody tr.critical-row {
 }
 
 
+.pagination {
+  width: 22px;
+  height: 22px;
+  border: 1px solid #27344a;
+  background: #111b2b;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  font-size: 8px;
+  color: #aeb8ca;
+}
 
-.page.active {
+
+.pagination.active {
 
   background: var(--blue);
 
