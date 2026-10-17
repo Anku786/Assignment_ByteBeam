@@ -7,14 +7,12 @@ const FLEET_SIZE = 500;
 const CHUNK = 500;
 const MAX_CATCHUP = 60; // ticks to catch up after a throttled/background tab
 
-const DRIVERS = ['Asha', 'Ravi', 'Meera', 'Imran', 'Priya', 'Kiran'];
 const FLEET = Array.from({ length: FLEET_SIZE }, (_, i) => {
     const n = String(i + 1).padStart(3, '0');
     return {
         id: `V-${n}`,
         name: `Truck ${n}`,
         plate: `KA-01-${1000 + i * 7}`,
-        driver: DRIVERS[i % DRIVERS.length],
         type: i % 3 === 0 ? 'EV' : 'Diesel',
     };
 });
@@ -68,13 +66,7 @@ let lastSeq = -1;
 let onError = null;
 
 async function ensureT0() {
-    const saved = await fleetDb.getMeta('sim_t0');
-    if (saved) {
-        t0 = Number(saved);
-    } else {
-        t0 = Date.now();
-        await fleetDb.setMeta('sim_t0', t0);
-    }
+    t0 = Date.now();
 }
 
 async function tick() {
@@ -119,6 +111,15 @@ export const simulator = {
         } finally {
             starting = false;
         }
+    },
+    async generateFreshBatch() {
+        await fleetDb.init();
+        await fleetDb.upsertVehicles(FLEET);
+
+        t0 = Date.now();
+        lastSeq = 0;
+
+        return FLEET.map((vehicle) => makePacket(vehicle, 0, t0));
     },
 
     stop() {

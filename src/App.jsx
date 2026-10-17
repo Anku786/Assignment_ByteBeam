@@ -8,7 +8,12 @@ function App() {
   const [collapsed, setCollapsed] = useState(false)
   const [searchQuery, setSearchQuery] = useState("");
   const { theme, toggleTheme } = useTheme();
-  const { running, start, stop } = useSimulator();
+  const { running, start, stop, refresh } = useSimulator();
+
+  const handleRefresh = async () => {
+    await refresh();
+  };
+
   return (
     <div className="app">
       <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
@@ -49,6 +54,9 @@ function App() {
           <div className="top-actions">
             <button type="button" className={`live${running ? '' : ' paused'}`} onClick={running ? stop : start}>
               <i></i> {running ? 'Live' : 'Paused'}
+            </button>
+            <button className="icon-btn" onClick={handleRefresh} title="Refresh" type="button">
+              ↻
             </button>
             <button className="icon-btn" onClick={toggleTheme} title="Theme" type="button">
               ☼

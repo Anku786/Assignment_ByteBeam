@@ -38,13 +38,30 @@ const notify = () => listeners.forEach((fn) => fn());
 
 export const fleetDb = {
     init: () => call('init'),
-    query: (sql) => call('query', sql),
-    getMeta: (key) => call('getMeta', key),
-    setMeta: (key, value) => call('setMeta', key, value),
+
     listVehicles: () => call('listVehicles'),
-    getTelemetryHistory: (opts) => call('getTelemetryHistory', opts),
-    getIngestionStats: () => call('getIngestionStats'),
-    clearData: () => call("clearData"),
+
+    async seedVehicles(vehicles) {
+        const res = await call('seedVehicles', vehicles);
+        notify();
+        return res;
+    },
+
+    async ingestTelemetry(records) {
+        const res = await call('ingestTelemetry', records);
+
+        if (res.inserted > 0) {
+            notify();
+        }
+
+        return res;
+    },
+
+    async refreshTelemetry(records) {
+        const res = await call('refreshTelemetry', records);
+        notify();
+        return res;
+    },
 
     async upsertVehicles(vehicles) {
         const res = await call('upsertVehicles', vehicles);
@@ -52,20 +69,12 @@ export const fleetDb = {
         return res;
     },
 
-    // Resolves AFTER the packets are committed and durable.
-    // Returns { received, inserted, duplicates, rejected }.
-    async ingestTelemetry(records) {
-        const res = await call('ingestTelemetry', records);
-        if (res.inserted > 0) notify(); // pure duplicates change nothing, so no refresh
+    async clearData() {
+        const res = await call('clearData');
+        notify();
         return res;
     },
 
-    async reset() {
-        await call('reset');
-        notify();
-    },
-
-    // Fires after a write is committed so views can re-query the database.
     subscribe(fn) {
         listeners.add(fn);
         return () => listeners.delete(fn);

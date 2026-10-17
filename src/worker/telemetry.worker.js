@@ -350,66 +350,36 @@ async function initDatabase() {
 // ---------------------------------------------------------
 
 async function seedVehicles(vehicles = []) {
-    if (!vehicles.length) {
-        return {
-            inserted: 0,
-        };
-    }
+    return upsertVehicles(vehicles);
+}
 
-    for (
-        let start = 0;
-        start < vehicles.length;
-        start += INGEST_CHUNK
-    ) {
-        const chunk = vehicles.slice(
-            start,
-            start + INGEST_CHUNK
-        );
+function sqlString(value) {
+    if (value == null) return 'NULL';
 
-        const values = chunk
-            .map((vehicle) => {
-                const quote = (value) =>
-                    `'${String(value ?? '')
-                        .replaceAll("'", "''")}'`;
+    return `'${String(value).replace(/'/g, "''")}'`;
+}
 
-                return `(
-                    ${quote(vehicle.id)},
-                    ${quote(vehicle.name)},
-                    ${quote(vehicle.vin)},
-                    ${quote(vehicle.make)},
-                    ${quote(vehicle.model)},
-                    ${quote(vehicle.region)},
-                    ${quote(vehicle.city)},
-                    ${Number(vehicle.lat ?? 0)},
-                    ${Number(vehicle.lng ?? 0)}
-                )`;
-            })
-            .join(',');
+async function upsertVehicles(vehicles = []) {
+    for (let i = 0; i < vehicles.length; i++) {
+        const vehicle = vehicles[i];
 
         await exec(`
-            INSERT INTO vehicles (
-                id,
-                name,
-                vin,
-                make,
-                model,
-                region,
-                city,
-                lat,
-                lng
-            )
-            VALUES ${values}
-
-            ON CONFLICT (id)
-            DO NOTHING
-        `);
+      INSERT INTO vehicles (id, data, position, updated_at)
+      VALUES (
+        ${sqlString(vehicle.id)},
+        ${sqlString(JSON.stringify(vehicle))}::JSON,
+        ${i},
+        now()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        data = EXCLUDED.data,
+        position = EXCLUDED.position,
+        updated_at = now()
+    `);
     }
 
     await persist();
-
-    return {
-        inserted: vehicles.length,
-    };
+    return vehicles.length;
 }
 
 
@@ -521,49 +491,44 @@ async function ingestTelemetry(records = []) {
 // ---------------------------------------------------------
 
 async function listVehicles() {
-    const rows = await query(`
-        SELECT
-            v.id,
-            v.data,
-            v.position,
-
-            arg_max(t.lat, t.ts)
-                FILTER (WHERE t.lat IS NOT NULL) AS lat,
-
-            arg_max(t.lng, t.ts)
-                FILTER (WHERE t.lng IS NOT NULL) AS lng,
-
-            arg_max(t.speed, t.ts)
-                FILTER (WHERE t.speed IS NOT NULL) AS speed,
-
-            arg_max(t.fuel, t.ts)
-                FILTER (WHERE t.fuel IS NOT NULL) AS fuel,
-
-            arg_max(t.battery, t.ts)
-                FILTER (WHERE t.battery IS NOT NULL) AS battery,
-
-            arg_max(t.engine_temp, t.ts)
-                FILTER (WHERE t.engine_temp IS NOT NULL) AS engine_temp,
-
-            MAX(t.ts) AS telemetry_ts,
-            MAX(t.received_at) AS received_at
-
-        FROM vehicles v
-
-        LEFT JOIN telemetry t
-            ON t.vehicle_id = v.id
-
-        GROUP BY
-            v.id,
-            v.data,
-            v.position
-
-        ORDER BY v.id
-    `);
-
-    return rows;
+    return query(`
+    SELECT
+      v.id,
+      v.data->>'name' AS name,
+      v.data->>'plate' AS plate,
+      v.data->>'driver' AS driver,
+      v.data->>'type' AS type,
+      v.position,
+      arg_max(t.lat, t.ts) AS lat,
+      arg_max(t.lng, t.ts) AS lng,
+      arg_max(t.speed, t.ts) AS speed,
+      arg_max(t.fuel, t.ts) AS fuel,
+      arg_max(t.battery, t.ts) AS battery,
+      arg_max(t.engine_temp, t.ts) AS engine_temp,
+      MAX(t.ts) AS telemetry_ts,
+      MAX(t.received_at) AS received_at
+    FROM vehicles v
+    LEFT JOIN telemetry t ON t.vehicle_id = v.id
+    GROUP BY v.id, v.data, v.position
+    ORDER BY v.position, v.id
+  `);
 }
 
+// ---------------------------------------------------------
+// Refresg fleet state
+// ---------------------------------------------------------
+
+async function refreshTelemetry(records = [], vehicles = []) {
+    await seedVehicles(vehicles);
+    await exec('DELETE FROM telemetry');
+    await ingestTelemetry(records);
+    await persist();
+
+    return {
+        refreshed: records.length,
+        vehicles: await listVehicles(),
+    };
+}
 
 // ---------------------------------------------------------
 // Repository
@@ -572,9 +537,11 @@ async function listVehicles() {
 const repository = {
     init: initDatabase,
     seedVehicles,
+    upsertVehicles,
     ingestTelemetry,
     listVehicles,
-    clearData
+    clearData,
+    refreshTelemetry
 };
 
 

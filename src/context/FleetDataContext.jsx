@@ -98,6 +98,7 @@ export const FleetDataProvider = ({ children }) => {
             getTelemetryHistory: fleetDb.getTelemetryHistory,
             getIngestionStats: fleetDb.getIngestionStats,
             resetData: fleetDb.reset,
+            refreshTelemetry: fleetDb.refreshTelemetry
         }),
         [rows, status, error, storage]
     );
