@@ -4207,6 +4207,30 @@ tbody tr.critical-row {
   transform: scale(0.94);
 }
 
+.data-table tr.is-offline {
+  opacity: 0.5;
+}
+
+.data-table tr.is-critical {
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.sim-controls {
+  margin-bottom: 12px;
+}
+
+.sim-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+  align-items: center;
+}
+
+.sim-stats {
+  font-size: 12px;
+}
+
 /* Light-mode corrections for legacy page-specific dark surfaces. */
 html.light .page {
   background: radial-gradient(circle at 80% 0%, rgba(36, 107, 255, 0.045), transparent 35%), var(--bg);
@@ -4249,3 +4273,9 @@ html.light .page .packet-list {
 html.light .page-icon {
   background-color: var(--icon-bg);
 }
+
+.data-table tr.is-offline { opacity: 0.5; }
+.data-table tr.is-critical { background: rgba(220, 38, 38, 0.08); }
+.sim-controls { margin-bottom: 12px; }
+.sim-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
+.sim-stats { font-size: 12px; }

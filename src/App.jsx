@@ -2,11 +2,13 @@ import { useState } from "react";
 import { NavLink } from 'react-router-dom';
 import { AppRoutes } from "./routes";
 import { useTheme } from "./context/ThemeContext";
+import { useSimulator } from "./context/SimulatorContext";
 
 function App() {
   const [collapsed, setCollapsed] = useState(false)
   const [searchQuery, setSearchQuery] = useState("");
   const { theme, toggleTheme } = useTheme();
+  const { running, start, stop } = useSimulator();
   return (
     <div className="app">
       <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
@@ -45,6 +47,9 @@ function App() {
             />
           </div>
           <div className="top-actions">
+            <button type="button" className={`live${running ? '' : ' paused'}`} onClick={running ? stop : start}>
+              <i></i> {running ? 'Live' : 'Paused'}
+            </button>
             <button className="icon-btn" onClick={toggleTheme} title="Theme" type="button">
               ☼
             </button>

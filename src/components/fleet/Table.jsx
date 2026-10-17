@@ -1,15 +1,50 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useFleetData } from "../../context/FleetDataContext";
 import { TOTAL_PAGES } from "../../constants/stringConstants";
 
 const rowsPerPage = TOTAL_PAGES;
 
+// ---- helpers: derive display values from the latest DB readings ----
+const formatAge = (ms) => {
+    if (ms < 0) ms = 0;
+    if (ms < 60_000) return `${Math.round(ms / 1000)}s ago`;
+    if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
+    return `${Math.round(ms / 3_600_000)}h ago`;
+};
+
+const fmt = (v, digits = 0) => (v == null ? '—' : `${v.toFixed(digits)}`);
+
+// Thresholds are examples; tune them to your fleet.
+const getAlerts = (row) => {
+    const alerts = [];
+    const l = row.latest;
+    if (row.connection === 'offline') alerts.push({ level: 'issue', text: 'Offline' });
+    else if (row.connection === 'stale') alerts.push({ level: 'issue', text: 'Stale data' });
+    if (l) {
+        if (l.fuel != null && l.fuel < 25) alerts.push({ level: 'crit', text: 'Low fuel' });
+        if (l.battery != null && l.battery < 35) alerts.push({ level: 'crit', text: 'Low battery' });
+        if (l.engineTemp != null && l.engineTemp > 90) alerts.push({ level: 'crit', text: 'Engine hot' });
+    }
+    return alerts;
+};
+
+const getHealth = (row, alerts) => {
+    if (!row.latest) return '—';
+    if (alerts.some((a) => a.level === 'crit')) return 'Critical';
+    if (alerts.length) return 'Warning';
+    return 'Good';
+};
+
 const Table = () => {
     const [currentPage, setCurrentPage] = useState(1)
-    const { rows } = useFleetData()
+    const { rows, status, error } = useFleetData()
 
+    const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage))
 
-    const totalPages = Math.ceil(rows.length / rowsPerPage)
+    // keep the page valid if the row count changes
+    useEffect(() => {
+        if (currentPage > totalPages) setCurrentPage(totalPages)
+    }, [currentPage, totalPages])
 
     const startIndex = (currentPage - 1) * rowsPerPage
     const endIndex = startIndex + rowsPerPage
@@ -17,36 +52,57 @@ const Table = () => {
     const visibleVehicles = rows.slice(startIndex, endIndex)
 
     const columns = [
-        { key: 'name', header: 'Vehicle ID / Name' },
         {
-            key: 'battery_per',
+            key: 'name',
+            header: 'Vehicle ID / Name',
+            render: (row) => `${row.id} / ${row.name ?? '—'}`,
+        },
+        {
+            key: 'battery',
             header: 'Battery %',
+            render: (row) => (row.latest ? `${fmt(row.latest.battery)}%` : '—'),
         },
         {
             key: 'health',
             header: 'Health',
+            render: (row) => getHealth(row, getAlerts(row)),
         },
         {
-            key: 'status',
+            key: 'ignition',
             header: 'Ignition',
+            // Derived: moving => on. Replace if you ingest a real ignition signal.
+            render: (row) =>
+                row.latest?.speed == null ? '—' : row.latest.speed > 0 ? 'On' : 'Off',
         },
         {
             key: 'fuel',
             header: 'Fuel',
-            render: (row) =>
-                row.latest
-                    ? `${Math.round(row.latest.fuelPct)}%`
-                    : '—',
+            render: (row) => (row.latest?.fuel == null ? '—' : `${Math.round(row.latest.fuel)}%`),
         },
         {
             key: 'freshness',
             header: 'Freshness',
+            render: (row) =>
+                row.latest
+                    ? `${row.connection} · ${formatAge(Date.now() - row.latest.lastReceived)}`
+                    : 'No data',
         },
         {
             key: 'alerts',
             header: 'Alerts',
+            render: (row) => {
+                const alerts = getAlerts(row)
+                return alerts.length ? alerts.map((a) => a.text).join(', ') : '—'
+            },
         },
     ]
+
+    const rowClass = (row) => {
+        const alerts = getAlerts(row)
+        if (row.connection === 'offline') return 'is-offline'
+        if (alerts.some((a) => a.level === 'crit')) return 'is-critical'
+        return ''
+    }
 
     const getPages = () => {
         if (totalPages <= 7) {
@@ -80,6 +136,11 @@ const Table = () => {
             totalPages,
         ]
     }
+
+    if (status === 'error') {
+        return <section><p className="empty">Storage error: {error?.message}</p></section>
+    }
+
     return (
         <section>
             <div className="table-wrap">
@@ -92,19 +153,25 @@ const Table = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {visibleVehicles?.length === 0 ? (
+                        {status === 'initializing' ? (
                             <tr>
                                 <td colSpan={columns.length} className="empty">
-                                    No Rows
+                                    Loading local data…
+                                </td>
+                            </tr>
+                        ) : visibleVehicles.length === 0 ? (
+                            <tr>
+                                <td colSpan={columns.length} className="empty">
+                                    No rows. Click "Paused" in the top bar to start ingesting telemetry.
                                 </td>
                             </tr>
                         ) : (
-                            visibleVehicles?.map((row) => (
-                                <tr
-                                    key={row.id}
-                                >
+                            visibleVehicles.map((row) => (
+                                <tr key={row.id} className={rowClass(row)}>
                                     {columns.map((column) => (
-                                        <td key={column.key}>{column.render ? column.render(row) : row[column.key]}</td>
+                                        <td key={column.key}>
+                                            {column.render ? column.render(row) : row[column.key]}
+                                        </td>
                                     ))}
                                 </tr>
                             ))
@@ -118,7 +185,10 @@ const Table = () => {
                 <span className="legend-dot"><i className="issue"></i>State/data issue</span>
                 <span className="legend-dot"><i className="off"></i>Offline (muted)</span>
             </div>
-            <div className="table-footer"><span>Showing 1–10 of 500 vehicles</span>
+            <div className="table-footer">
+                <span>
+                    Showing {rows.length ? startIndex + 1 : 0}–{Math.min(endIndex, rows.length)} of {rows.length} vehicles
+                </span>
                 <div className="pages">
                     <button
                         className="pagination"
