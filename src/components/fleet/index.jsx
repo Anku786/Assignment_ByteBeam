@@ -1,5 +1,8 @@
 import Alert from "./Alert";
+import BatteryHealth from "../Charts/BatteryHealth";
 import Table from "./Table";
+import Activity from "../Charts/Activity";
+import Status from "../Charts/Status";
 
 const FleetOverview = () => {
     return (
@@ -9,6 +12,11 @@ const FleetOverview = () => {
                     <div className="page-icon">▣</div>
                     <div><h1>Fleet Overview</h1><div className="page-sub">Real-time summary of your fleet operations</div></div>
                 </div>
+            </div>
+            <div className="middle">
+                <Activity />
+                <Status />
+                <BatteryHealth />
             </div>
             <div className="table-wrap">
                 <Table />

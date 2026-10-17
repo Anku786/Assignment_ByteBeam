@@ -124,7 +124,6 @@ const getHealth = (row) => {
 const Table = () => {
     const [currentPage, setCurrentPage] = useState(1)
     const { rows, status, error } = useFleetData()
-    console.log(rows.splice(0,20))
     const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage))
 
     // keep the page valid if the row count changes
