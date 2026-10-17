@@ -76,7 +76,7 @@ export const FleetDataProvider = ({ children }) => {
     const rows = useMemo(
         () =>
             dbRows.map((r) => {
-                const seen = r.latest?.lastReceived;
+                const seen = r?.lastReceived;
                 const connection =
                     seen == null ? 'never'
                         : now - seen <= ONLINE_MS ? 'online'
