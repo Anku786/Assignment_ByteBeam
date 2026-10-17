@@ -2244,6 +2244,25 @@ tbody tr.critical-row {
 
 }
 
+.alert-item-empty {
+
+  border: 1px solid #7a2832;
+
+  background: rgba(94, 26, 36, 0.25);
+
+  border-radius: 5px;
+
+  padding: 10px;
+
+  margin-bottom: 7px;
+
+  display: grid;
+
+  grid-template-columns: 14px 1fr auto;
+
+  gap: 7px;
+
+}
 
 
 .alert-item.warning {
@@ -4274,8 +4293,26 @@ html.light .page-icon {
   background-color: var(--icon-bg);
 }
 
-.data-table tr.is-offline { opacity: 0.5; }
-.data-table tr.is-critical { background: rgba(220, 38, 38, 0.08); }
-.sim-controls { margin-bottom: 12px; }
-.sim-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
-.sim-stats { font-size: 12px; }
+.data-table tr.is-offline {
+  opacity: 0.5;
+}
+
+.data-table tr.is-critical {
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.sim-controls {
+  margin-bottom: 12px;
+}
+
+.sim-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+  align-items: center;
+}
+
+.sim-stats {
+  font-size: 12px;
+}

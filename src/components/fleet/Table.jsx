@@ -124,7 +124,7 @@ const getHealth = (row) => {
 const Table = () => {
     const [currentPage, setCurrentPage] = useState(1)
     const { rows, status, error } = useFleetData()
-
+    console.log(rows.splice(0,20))
     const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage))
 
     // keep the page valid if the row count changes
@@ -227,42 +227,40 @@ const Table = () => {
 
     return (
         <section>
-            <div className="table-wrap">
-                <table className="data-table">
-                    <thead>
+            <table className="data-table">
+                <thead>
+                    <tr>
+                        {columns.map((column) => (
+                            <th key={column.key}>{column.header}</th>
+                        ))}
+                    </tr>
+                </thead>
+                <tbody>
+                    {status === 'initializing' ? (
                         <tr>
-                            {columns.map((column) => (
-                                <th key={column.key}>{column.header}</th>
-                            ))}
+                            <td colSpan={columns.length} className="empty">
+                                Loading local data…
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {status === 'initializing' ? (
-                            <tr>
-                                <td colSpan={columns.length} className="empty">
-                                    Loading local data…
-                                </td>
+                    ) : visibleVehicles.length === 0 ? (
+                        <tr>
+                            <td colSpan={columns.length} className="empty">
+                                No rows. Click "Paused" in the top bar to start ingesting telemetry.
+                            </td>
+                        </tr>
+                    ) : (
+                        visibleVehicles.map((row) => (
+                            <tr key={row.id} className={rowClass(row)}>
+                                {columns.map((column) => (
+                                    <td key={column.key}>
+                                        {column.render ? column.render(row) : row[column.key]}
+                                    </td>
+                                ))}
                             </tr>
-                        ) : visibleVehicles.length === 0 ? (
-                            <tr>
-                                <td colSpan={columns.length} className="empty">
-                                    No rows. Click "Paused" in the top bar to start ingesting telemetry.
-                                </td>
-                            </tr>
-                        ) : (
-                            visibleVehicles.map((row) => (
-                                <tr key={row.id} className={rowClass(row)}>
-                                    {columns.map((column) => (
-                                        <td key={column.key}>
-                                            {column.render ? column.render(row) : row[column.key]}
-                                        </td>
-                                    ))}
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
-            </div>
+                        ))
+                    )}
+                </tbody>
+            </table>
             <div className="legend-line">
                 <span className="legend-dot"><i className="sel"></i>Selected row</span>
                 <span className="legend-dot"><i className="crit"></i>Critical alert</span>

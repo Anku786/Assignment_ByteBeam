@@ -1,3 +1,4 @@
+import Alert from "./Alert";
 import Table from "./Table";
 
 const FleetOverview = () => {
@@ -9,7 +10,10 @@ const FleetOverview = () => {
                     <div><h1>Fleet Overview</h1><div className="page-sub">Real-time summary of your fleet operations</div></div>
                 </div>
             </div>
-            <Table />
+            <div className="table-wrap">
+                <Table />
+                <Alert />
+            </div>
         </section>
     )
 }
