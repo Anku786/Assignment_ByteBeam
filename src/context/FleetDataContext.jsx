@@ -103,6 +103,8 @@ export const FleetDataProvider = ({ children }) => {
         [rows, status, error, storage]
     );
 
+    console.log("ASAS",value)
+
     return <FleetDataContext.Provider value={value}>{children}</FleetDataContext.Provider>;
 };
 

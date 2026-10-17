@@ -38,6 +38,7 @@ const notify = () => listeners.forEach((fn) => fn());
 
 export const fleetDb = {
     init: () => call('init'),
+    query: (sql) => call('query', sql),
     getMeta: (key) => call('getMeta', key),
     setMeta: (key, value) => call('setMeta', key, value),
     listVehicles: () => call('listVehicles'),
@@ -54,6 +55,10 @@ export const fleetDb = {
     // Resolves AFTER the packets are committed and durable.
     // Returns { received, inserted, duplicates, rejected }.
     async ingestTelemetry(records) {
+        console.log('[DB] ingestTelemetry called', {
+            count: records?.length,
+            first: records?.[0],
+        });
         const res = await call('ingestTelemetry', records);
         if (res.inserted > 0) notify(); // pure duplicates change nothing, so no refresh
         return res;
@@ -70,3 +75,11 @@ export const fleetDb = {
         return () => listeners.delete(fn);
     },
 };
+
+if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+        worker?.terminate();
+        worker = null;
+        pending.clear();
+    });
+}
