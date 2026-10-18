@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from 'react-router-dom'
 import { useFleetData } from "../../context/FleetDataContext";
 import { TOTAL_PAGES } from "../../constants/stringConstants";
 
@@ -126,6 +127,8 @@ const Table = () => {
     const { rows, status, error } = useFleetData()
     const totalPages = Math.max(1, Math.ceil(rows.length / rowsPerPage))
 
+    const navigate = useNavigate()
+
     // keep the page valid if the row count changes
     useEffect(() => {
         if (currentPage > totalPages) setCurrentPage(totalPages)
@@ -249,7 +252,7 @@ const Table = () => {
                         </tr>
                     ) : (
                         visibleVehicles.map((row) => (
-                            <tr key={row.id} className={rowClass(row)}>
+                            <tr key={row.id} className="clickable" onClick={() => navigate(`/vehicles/${row.id}`)}>
                                 {columns.map((column) => (
                                     <td key={column.key}>
                                         {column.render ? column.render(row) : row[column.key]}

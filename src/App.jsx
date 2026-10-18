@@ -29,7 +29,7 @@ function App() {
             <span className="nav-icon">▱</span>
             Vehicles
           </NavLink>
-          <NavLink to="/attention" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
+          <NavLink to="/alert" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}>
             <span className="nav-icon">△</span>
             Alerts
           </NavLink>
