@@ -4,6 +4,19 @@ let seq = 0;
 const pending = new Map();
 const listeners = new Set();
 
+let initPromise = null;
+
+function ensureInit() {
+    if (!initPromise) {
+        initPromise = call('init').catch((error) => {
+            initPromise = null;
+            throw error;
+        });
+    }
+
+    return initPromise;
+}
+
 function getWorker() {
     if (worker) return worker;
     worker = new Worker(new URL('../worker/telemetry.worker.js', import.meta.url), { type: 'module' });
@@ -37,17 +50,28 @@ function call(method, ...args) {
 const notify = () => listeners.forEach((fn) => fn());
 
 export const fleetDb = {
-    init: () => call('init'),
+    async init() {
+        return ensureInit();
+    },
 
-    listVehicles: () => call('listVehicles'),
+    async listVehicles() {
+        await ensureInit();
+        return call('listVehicles');
+    },
 
     async seedVehicles(vehicles) {
+        await ensureInit();
+
         const res = await call('seedVehicles', vehicles);
+
         notify();
+
         return res;
     },
 
     async ingestTelemetry(records) {
+        await ensureInit();
+
         const res = await call('ingestTelemetry', records);
 
         if (res.inserted > 0) {
@@ -58,25 +82,48 @@ export const fleetDb = {
     },
 
     async refreshTelemetry(records) {
+        await ensureInit();
+
         const res = await call('refreshTelemetry', records);
+
         notify();
+
         return res;
     },
 
     async upsertVehicles(vehicles) {
+        await ensureInit();
+
         const res = await call('upsertVehicles', vehicles);
+
         notify();
+
         return res;
     },
 
+    async getTelemetryHistory(vehicleId, limit = 20) {
+        await ensureInit();
+
+        return call(
+            'getTelemetryHistory',
+            vehicleId,
+            limit
+        );
+    },
+
     async clearData() {
+        await ensureInit();
+
         const res = await call('clearData');
+
         notify();
+
         return res;
     },
 
     subscribe(fn) {
         listeners.add(fn);
+
         return () => listeners.delete(fn);
     },
 };

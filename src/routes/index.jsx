@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import FleetOverview from '../components/fleet'
+import FleetOverview from '../components/Fleet'
 import Alert from '../components/Alert'
 import VehicleDetail from '../components/VehicleDetail'
 

@@ -8,3 +8,19 @@ export const formatAge = (ageMs) => {
     const hours = Math.floor(minutes / 60)
     return `${hours}h ago`
 }
+
+export const formatTime = (value) => {
+    if (value == null) return '—';
+
+    const date = new Date(Number(value));
+
+    if (Number.isNaN(date.getTime())) {
+        return '—';
+    }
+
+    return date.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    });
+}

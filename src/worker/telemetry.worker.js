@@ -530,6 +530,27 @@ async function refreshTelemetry(records = [], vehicles = []) {
     };
 }
 
+async function getTelemetryHistory(vehicleId, limit = 20) {
+    return query(`
+    SELECT
+      packet_id AS id,
+      vehicle_id AS vehicleId,
+      seq,
+      ts,
+      received_at AS receivedAt,
+      lat,
+      lng,
+      speed,
+      fuel,
+      battery,
+      engine_temp AS engineTemp
+    FROM telemetry
+    WHERE vehicle_id = ${sqlString(vehicleId)}
+    ORDER BY ts DESC
+    LIMIT ${Number(limit)}
+  `);
+}
+
 // ---------------------------------------------------------
 // Repository
 // ---------------------------------------------------------
@@ -541,7 +562,8 @@ const repository = {
     ingestTelemetry,
     listVehicles,
     clearData,
-    refreshTelemetry
+    refreshTelemetry,
+    getTelemetryHistory
 };
 
 

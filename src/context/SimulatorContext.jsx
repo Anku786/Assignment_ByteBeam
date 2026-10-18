@@ -19,6 +19,7 @@ const FLEET = Array.from({ length: FLEET_SIZE }, (_, i) => {
         name: `Truck ${n}`,
         plate: `KA-01-${1000 + i * 7}`,
         type: i % 3 === 0 ? 'EV' : 'Diesel',
+        odometer: 12000 + i * 37,
     };
 });
 
