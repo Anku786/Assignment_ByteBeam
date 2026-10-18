@@ -30,7 +30,7 @@ function isFresh(signalState) {
 }
 
 
-function getAlerts(row) {
+export function getAlerts(row) {
     const alerts = [];
 
     const hasValue = (value) =>
