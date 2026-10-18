@@ -9,20 +9,6 @@ import {
 import { simulator } from '../simulator/telemetry.simulator.js';
 import { fleetDb } from '../db/dbClient.js';
 
-const FLEET_SIZE = 500;
-
-const FLEET = Array.from({ length: FLEET_SIZE }, (_, i) => {
-    const n = String(i + 1).padStart(3, '0');
-
-    return {
-        id: `V-${n}`,
-        name: `Truck ${n}`,
-        plate: `KA-01-${1000 + i * 7}`,
-        type: i % 3 === 0 ? 'EV' : 'Diesel',
-        odometer: 12000 + i * 37,
-    };
-});
-
 const SimulatorContext = createContext(null);
 
 export const SimulatorProvider = ({ children }) => {
@@ -56,7 +42,7 @@ export const SimulatorProvider = ({ children }) => {
 
             const records = await simulator.generateFreshBatch();
 
-            await fleetDb.refreshTelemetry(records, FLEET);
+            await fleetDb.refreshTelemetry(records, simulator.getFleet());
         } catch (e) {
             setError(e);
         } finally {

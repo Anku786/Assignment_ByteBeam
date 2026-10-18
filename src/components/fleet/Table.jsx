@@ -13,112 +13,16 @@ const formatAge = (ms) => {
     return `${Math.round(ms / 3_600_000)}h ago`;
 };
 
-const fmt = (v, digits = 0) => (v == null ? '—' : `${v.toFixed(digits)}`);
 
 // Thresholds are examples; tune them to your fleet.
-const getAlerts = (row) => {
-    const alerts = [];
-    const l = row;
-
-    // Connection status
-    if (row.connection === 'offline') {
-        alerts.push({
-            level: 'crit',
-            text: 'Offline',
-        });
-    } else if (
-        row.connection === 'stale' ||
-        (
-            l.received_at != null &&
-            Date.now() - Number(l.received_at) > 2 * 60 * 1000
-        )
-    ) {
-        alerts.push({
-            level: 'warn',
-            text: 'Stale data',
-        });
-    }
-
-    if (!l) return alerts;
-
-    const battery = l.battery;
-    const fuel = l.fuel;
-    const engineTemp = l.engineTemp ?? l.engine_temp;
-
-    // Determine vehicle type
-    let vehicleType = row.type ?? l.type;
-
-    if (!vehicleType && row.data) {
-        try {
-            const data = typeof row.data === 'string'
-                ? JSON.parse(row.data)
-                : row.data;
-
-            vehicleType = data.type;
-        } catch {
-            // Ignore malformed vehicle metadata.
-        }
-    }
-
-    // Battery alerts
-    if (battery != null && battery < 10) {
-        alerts.push({
-            level: 'crit',
-            text: 'Critical battery',
-        });
-    } else if (battery != null && battery < 20) {
-        alerts.push({
-            level: 'warn',
-            text: 'Low battery',
-        });
-    }
-
-    // Fuel alerts: skip EVs
-    if (vehicleType !== 'EV' && fuel != null && fuel < 5) {
-        alerts.push({
-            level: 'crit',
-            text: 'Critical fuel',
-        });
-    } else if (
-        vehicleType !== 'EV' &&
-        fuel != null &&
-        fuel < 20
-    ) {
-        alerts.push({
-            level: 'warn',
-            text: 'Low fuel',
-        });
-    }
-
-    // Engine temperature alerts
-    if (engineTemp != null && engineTemp >= 110) {
-        alerts.push({
-            level: 'crit',
-            text: 'Engine temperature critical',
-        });
-    } else if (engineTemp != null && engineTemp >= 100) {
-        alerts.push({
-            level: 'warn',
-            text: 'High engine temperature',
-        });
-    }
-
-    return alerts;
-};
+const getAlerts = (row) => row?.openAlerts ?? [];
 
 const getHealth = (row) => {
     if (!row) return 'Unknown';
-
-    const alerts = getAlerts(row);
-
-    if (alerts.some((alert) => alert.level === 'crit')) {
-        return 'Critical';
-    }
-
-    if (alerts.length > 0) {
-        return 'Warning';
-    }
-
+    if (row.status === 'critical') return 'Critical';
+    if (row.status === 'attention') return 'Warning';
+    if (row.status === 'uncertain') return 'Uncertain';
+    if (row.status === 'offline') return 'Offline';
     return 'Good';
 };
 
@@ -147,7 +51,7 @@ const Table = () => {
         {
             key: 'battery',
             header: 'Battery %',
-            render: (row) => (<div className={`battery ${row.battery > 70 ? "green" : row.battery < 10 ? "red" : "amber"}`}><span className="battery-track"><span style={{ width: `${row.battery}%` }}></span></span><b>{row.battery}%</b></div>),
+            render: (row) => (<div className={`battery ${Number(row.battery) > 70 ? "green" : Number(row.battery) < 10 ? "red" : "amber"}`}><span className="battery-track"><span style={{ width: `${row.battery ?? 0}%` }}></span></span><b>{row.battery == null ? '—' : `${Math.round(Number(row.battery))}%`}</b></div>),
         },
         {
             key: 'health',
@@ -169,8 +73,8 @@ const Table = () => {
             key: 'freshness',
             header: 'Freshness',
             render: (row) =>
-                row.telemetry_ts
-                    ? `${formatAge(Date.now() - row.telemetry_ts)}`
+                row.received_at
+                    ? `${formatAge(Date.now() - Number(row.received_at))}`
                     : 'No data',
         },
         {

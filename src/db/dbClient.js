@@ -35,6 +35,7 @@ function getWorker() {
         const err = new Error(e.message || 'Database worker crashed');
         pending.forEach((p) => p.reject(err));
         pending.clear();
+        initPromise = null;
     };
     return worker;
 }
@@ -59,16 +60,6 @@ export const fleetDb = {
         return call('listVehicles');
     },
 
-    async seedVehicles(vehicles) {
-        await ensureInit();
-
-        const res = await call('seedVehicles', vehicles);
-
-        notify();
-
-        return res;
-    },
-
     async ingestTelemetry(records) {
         await ensureInit();
 
@@ -81,10 +72,10 @@ export const fleetDb = {
         return res;
     },
 
-    async refreshTelemetry(records) {
+    async refreshTelemetry(records, vehicles = []) {
         await ensureInit();
 
-        const res = await call('refreshTelemetry', records);
+        const res = await call('refreshTelemetry', records, vehicles);
 
         notify();
 
@@ -109,16 +100,6 @@ export const fleetDb = {
             vehicleId,
             limit
         );
-    },
-
-    async clearData() {
-        await ensureInit();
-
-        const res = await call('clearData');
-
-        notify();
-
-        return res;
     },
 
     subscribe(fn) {

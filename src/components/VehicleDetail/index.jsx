@@ -3,19 +3,11 @@ import { Link, useParams } from 'react-router-dom';
 import { VehicleHeader } from './header';
 import { useFleetData } from '../../context/FleetDataContext';
 import { formatTime } from '../../utils/format';
-import Timeline from './Timeline';
 
 const VehicleDetail = () => {
     const { vehicleId } = useParams();
-    const {
-        rows,
-        status,
-        attention,
-        getTelemetryHistory,
-    } = useFleetData();
-
+    const { rows, status, attention, getTelemetryHistory } = useFleetData();
     const [history, setHistory] = useState([]);
-
     const vehicle = rows.find((row) => row.id === vehicleId);
 
     const events = useMemo(
@@ -38,23 +30,14 @@ const VehicleDetail = () => {
 
         let cancelled = false;
 
-        const loadHistory = async () => {
-            try {
-                const packets = await getTelemetryHistory(vehicleId, 20);
-
-                if (!cancelled) {
-                    setHistory(packets);
-                }
-            } catch (error) {
+        getTelemetryHistory(vehicleId, 30)
+            .then((packets) => {
+                if (!cancelled) setHistory(packets);
+            })
+            .catch((error) => {
                 console.error('Failed to load telemetry history:', error);
-
-                if (!cancelled) {
-                    setHistory([]);
-                }
-            }
-        };
-
-        loadHistory();
+                if (!cancelled) setHistory([]);
+            });
 
         return () => {
             cancelled = true;
@@ -71,59 +54,31 @@ const VehicleDetail = () => {
 
     return (
         <div className="page">
-            <p>
-                <Link to="/">← Fleet</Link>
-            </p>
+            <p><Link to="/">← Fleet</Link></p>
 
             <VehicleHeader vehicle={vehicle} />
 
             <section className="metric-grid">
-                <article>
-                    <p>Speed</p>
-                    <strong>
-                        {vehicle.speed != null
-                            ? `${Math.round(Number(vehicle.speed))} km/h`
-                            : '—'}
-                    </strong>
-                </article>
-
-                <article>
-                    <p>Fuel</p>
-                    <strong>
-                        {vehicle.fuel != null
-                            ? `${Math.round(Number(vehicle.fuel))}%`
-                            : '—'}
-                    </strong>
-                </article>
-
-                <article>
-                    <p>Ignition</p>
-                    <strong>{vehicle.ignition ?? '—'}</strong>
-                </article>
-
-                <article>
-                    <p>Odometer</p>
-                    <strong>
-                        {vehicle.odometer != null
-                            ? `${Number(vehicle.odometer).toLocaleString()} km`
-                            : '—'}
-                    </strong>
-                </article>
-
-                <article>
-                    <p>GPS</p>
-                    <strong>
-                        {vehicle.lat != null && vehicle.lng != null
-                            ? `${Number(vehicle.lat).toFixed(4)}, ${Number(vehicle.lng).toFixed(4)}`
-                            : '—'}
-                    </strong>
-                </article>
+                <article><p>Speed</p><strong>{vehicle.speed != null ? `${Math.round(Number(vehicle.speed))} km/h` : '—'}</strong></article>
+                <article><p>Battery SOC</p><strong>{vehicle.battery != null ? `${Math.round(Number(vehicle.battery))}%` : '—'}</strong></article>
+                <article><p>Battery Temp</p><strong>{vehicle.battery_temp != null ? `${Number(vehicle.battery_temp).toFixed(1)}°C` : '—'}</strong></article>
+                <article><p>Ignition</p><strong>{vehicle.ignition ?? '—'}</strong></article>
+                <article><p>Odometer</p><strong>{vehicle.odometer != null ? `${Number(vehicle.odometer).toLocaleString()} km` : '—'}</strong></article>
+                <article><p>GPS</p><strong>{vehicle.lat != null && vehicle.lng != null ? `${Number(vehicle.lat).toFixed(4)}, ${Number(vehicle.lng).toFixed(4)}` : '—'}</strong></article>
             </section>
 
-            <div className="split">
+            <div className='split'>
                 <section>
-                    <h2>Attention</h2>
-                    <Timeline events={events} empty="No alert history for this vehicle." />
+                    <h2>Current attention</h2>
+                    {vehicle.openAlerts?.length ? (
+                        <ul>
+                            {vehicle.openAlerts.map((alert) => (
+                                <li key={alert.id}>{alert.severity ?? alert.level}: {alert.message ?? alert.text}</li>
+                            ))}
+                        </ul>
+                    ) : (
+                        <p>No current alert from fresh readings.</p>
+                    )}
                 </section>
                 <section>
                     <h2>Recent packets</h2>
@@ -156,7 +111,6 @@ const VehicleDetail = () => {
                     )}
                 </section>
             </div>
-
         </div>
     );
 };

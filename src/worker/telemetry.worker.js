@@ -1,31 +1,24 @@
+
 /* eslint-env worker */
 
 import * as duckdb from '@duckdb/duckdb-wasm';
-
 import mvpWasm from '@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url';
 import mvpWorker from '@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url';
-
 import ehWasm from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url';
 import ehWorker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url';
+import { SCHEMA_SQL } from '../db/schema.js';
 
-const DB_PATH = 'opfs://fleet-console.db';
-
-const IDB_NAME = 'fleet-console-fallback';
+const DB_PATH = 'opfs://fleet-console-v2.db';
+const IDB_NAME = 'fleet-console-fallback-v2';
 const IDB_STORE = 'database';
-
-const INGEST_CHUNK = 5000;
+const TABLES = ['vehicles', 'telemetry'];
+const INGEST_CHUNK = 1000;
 
 let db = null;
 let conn = null;
 let mode = null;
 let initPromise = null;
-
 let workerBundle = null;
-
-
-// ---------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------
 
 function toPlain(rows) {
     return rows.toArray().map((row) => {
@@ -41,26 +34,28 @@ function toPlain(rows) {
     });
 }
 
-
 async function query(sql) {
-    if (!conn) {
-        throw new Error('DuckDB is not initialized');
-    }
-
-    const result = await conn.query(sql);
-
-    return toPlain(result);
+    if (!conn) throw new Error('DuckDB is not initialized');
+    return toPlain(await conn.query(sql));
 }
 
-
 async function exec(sql) {
-    if (!conn) {
-        throw new Error('DuckDB is not initialized');
-    }
-
+    if (!conn) throw new Error('DuckDB is not initialized');
     await conn.query(sql);
 }
 
+function sqlString(value) {
+    if (value == null) return 'NULL';
+    return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function sqlNumber(value) {
+    if (value == null || !Number.isFinite(Number(value))) {
+        return 'NULL';
+    }
+
+    return String(Number(value));
+}
 
 function supportsOPFS() {
     return (
@@ -68,11 +63,6 @@ function supportsOPFS() {
         !!navigator.storage?.getDirectory
     );
 }
-
-
-// ---------------------------------------------------------
-// IndexedDB fallback
-// ---------------------------------------------------------
 
 function openIDB() {
     return new Promise((resolve, reject) => {
@@ -91,103 +81,117 @@ function openIDB() {
     });
 }
 
-
 async function saveSnapshot() {
     const files = {};
 
-    for (const table of ['vehicles', 'telemetry']) {
+    for (const table of TABLES) {
         const file = `snapshot-${table}.parquet`;
 
-        await exec(`
-            COPY ${table}
-            TO '${file}'
-            (FORMAT PARQUET)
-        `);
+        await exec(`COPY ${table} TO '${file}' (FORMAT PARQUET)`);
 
         try {
             const buffer = await db.copyFileToBuffer(file);
-
             files[table] = buffer.slice().buffer;
         } finally {
             try {
                 await db.dropFile(file);
             } catch {
-                // Ignore cleanup errors.
+                // Ignore temporary file cleanup errors.
             }
         }
     }
 
     const database = await openIDB();
 
-    return new Promise((resolve, reject) => {
-        const transaction = database.transaction(
-            IDB_STORE,
-            'readwrite'
-        );
+    try {
+        await new Promise((resolve, reject) => {
+            const transaction = database.transaction(
+                IDB_STORE,
+                'readwrite',
+            );
 
-        const store = transaction.objectStore(IDB_STORE);
-
-        store.put(files, 'database');
-
-        transaction.oncomplete = resolve;
-        transaction.onerror = () => reject(transaction.error);
-    });
+            transaction.objectStore(IDB_STORE).put(files, 'database');
+            transaction.oncomplete = resolve;
+            transaction.onerror = () => reject(transaction.error);
+            transaction.onabort = () => reject(transaction.error);
+        });
+    } finally {
+        database.close();
+    }
 }
-
 
 async function restoreSnapshot() {
     const database = await openIDB();
+    let snapshot;
 
-    const snapshot = await new Promise((resolve, reject) => {
-        const transaction = database.transaction(
-            IDB_STORE,
-            'readonly'
-        );
+    try {
+        snapshot = await new Promise((resolve, reject) => {
+            const transaction = database.transaction(
+                IDB_STORE,
+                'readonly',
+            );
 
-        const request = transaction
-            .objectStore(IDB_STORE)
-            .get('database');
+            const request = transaction.objectStore(IDB_STORE).get('database');
 
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
-
-    if (!snapshot) {
-        return;
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    } finally {
+        database.close();
     }
 
-    for (const table of ['vehicles', 'telemetry']) {
-        if (!snapshot[table]) {
-            continue;
-        }
+    if (!snapshot) return;
+
+    for (const table of TABLES) {
+        if (!snapshot[table]) continue;
 
         const file = `restore-${table}.parquet`;
 
         await db.registerFileBuffer(
             file,
-            new Uint8Array(snapshot[table])
+            new Uint8Array(snapshot[table]),
         );
 
         try {
+            // Restore only columns present in both the current table
+            // and the older snapshot. New columns default to NULL.
+            const targetInfo = await query(`PRAGMA table_info('${table}')`);
+            const sourceInfo = await query(
+                `DESCRIBE SELECT * FROM read_parquet('${file}')`,
+            );
+
+            const targetNames = new Set(
+                targetInfo.map((column) => column.name),
+            );
+
+            const sourceNames = new Set(
+                sourceInfo.map((column) => column.column_name),
+            );
+
+            const commonColumns = [...targetNames].filter((name) =>
+                sourceNames.has(name),
+            );
+
+            if (commonColumns.length === 0) continue;
+
+            const columnList = commonColumns
+                .map((name) => `"${name.replace(/"/g, '""')}"`)
+                .join(', ');
+
             await exec(`
-                INSERT INTO ${table}
-                SELECT *
+                INSERT INTO ${table} (${columnList})
+                SELECT ${columnList}
                 FROM read_parquet('${file}')
             `);
         } finally {
             try {
                 await db.dropFile(file);
             } catch {
-                // Ignore cleanup errors.
+                // Ignore temporary file cleanup errors.
             }
         }
     }
 }
-
-
-// ---------------------------------------------------------
-// Persistence
-// ---------------------------------------------------------
 
 async function persist() {
     if (mode === 'opfs') {
@@ -197,76 +201,69 @@ async function persist() {
     }
 }
 
-
-// ---------------------------------------------------------
-// DuckDB
-// ---------------------------------------------------------
-
 async function createDatabase() {
     workerBundle ??= await duckdb.selectBundle({
         mvp: {
             mainModule: mvpWasm,
             mainWorker: mvpWorker,
         },
-
         eh: {
             mainModule: ehWasm,
             mainWorker: ehWorker,
         },
     });
 
-    const duckWorker = new Worker(
-        workerBundle.mainWorker
-    );
+    const duckWorker = new Worker(workerBundle.mainWorker);
 
     const database = new duckdb.AsyncDuckDB(
-        new duckdb.ConsoleLogger(
-            duckdb.LogLevel.WARNING
-        ),
-        duckWorker
+        new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING),
+        duckWorker,
     );
 
     await database.instantiate(
         workerBundle.mainModule,
-        workerBundle.pthreadWorker
+        workerBundle.pthreadWorker,
     );
 
     return database;
 }
 
-
-// ---------------------------------------------------------
-// Database initialization
-// ---------------------------------------------------------
+/**
+ * Migrate existing databases after SCHEMA_SQL has created any missing tables.
+ * CREATE TABLE IF NOT EXISTS does not add columns to existing tables.
+ */
+async function migrateSchema() {
+    await exec(`
+        ALTER TABLE telemetry
+        ADD COLUMN IF NOT EXISTS battery_temp DOUBLE
+    `);
+}
 
 async function initDatabase() {
-    if (initPromise) {
-        return initPromise;
-    }
+    if (initPromise) return initPromise;
 
     initPromise = (async () => {
         db = await createDatabase();
-
-        // ---------------------------------------------
-        // Preferred: OPFS
-        // ---------------------------------------------
 
         if (supportsOPFS()) {
             try {
                 await db.open({
                     path: DB_PATH,
-                    accessMode:
-                        duckdb.DuckDBAccessMode.READ_WRITE,
+                    accessMode: duckdb.DuckDBAccessMode.READ_WRITE,
                 });
 
                 conn = await db.connect();
-
                 mode = 'opfs';
             } catch (error) {
+                console.warn(
+                    'OPFS initialization failed; using IndexedDB fallback.',
+                    error,
+                );
+
                 try {
                     await db.terminate();
                 } catch {
-                    // Ignore.
+                    // Ignore termination errors.
                 }
 
                 db = null;
@@ -274,57 +271,20 @@ async function initDatabase() {
             }
         }
 
-        // ---------------------------------------------
-        // Fallback: in-memory DuckDB + IndexedDB
-        // ---------------------------------------------
-
         if (!db) {
             db = await createDatabase();
-
-            await db.open({
-                path: ':memory:',
-            });
-
+            await db.open({ path: ':memory:' });
             conn = await db.connect();
-
             mode = 'indexeddb';
         }
 
-        // ---------------------------------------------
-        // Schema
-        // ---------------------------------------------
+        // Create tables first, then migrate older table definitions.
+        for (const statement of SCHEMA_SQL) {
+            await exec(statement);
+        }
 
-        await exec(`
-            CREATE TABLE IF NOT EXISTS vehicles (
-                id VARCHAR PRIMARY KEY,
-                name VARCHAR,
-                vin VARCHAR,
-                make VARCHAR,
-                model VARCHAR,
-                region VARCHAR,
-                city VARCHAR,
-                lat DOUBLE,
-                lng DOUBLE
-            )
-        `);
+        await migrateSchema();
 
-        await exec(`
-            CREATE TABLE IF NOT EXISTS telemetry (
-                packet_id VARCHAR PRIMARY KEY,
-                vehicle_id VARCHAR NOT NULL,
-                ts TIMESTAMP NOT NULL,
-                received_at TIMESTAMP NOT NULL,
-
-                lat DOUBLE,
-                lng DOUBLE,
-                speed DOUBLE,
-                fuel DOUBLE,
-                battery DOUBLE,
-                engine_temp DOUBLE
-            )
-        `);
-
-        // Restore only for fallback mode.
         if (mode === 'indexeddb') {
             const [{ count }] = await query(`
                 SELECT COUNT(*)::INTEGER AS count
@@ -336,109 +296,104 @@ async function initDatabase() {
             }
         }
 
-        return {
-            mode,
-        };
-    })();
+        // Verify the migration and make the actual columns visible in logs.
+        const telemetryColumns = await query(
+            `PRAGMA table_info('telemetry')`,
+        );
+
+        const columnNames = telemetryColumns.map((column) => column.name);
+
+        if (!columnNames.includes('battery_temp')) {
+            throw new Error(
+                'Schema migration failed: telemetry.battery_temp is missing',
+            );
+        }
+
+        console.info('[DuckDB] Storage mode:', mode);
+        console.info('[DuckDB] Telemetry columns:', columnNames);
+
+        return { mode };
+    })().catch((error) => {
+        initPromise = null;
+        throw error;
+    });
 
     return initPromise;
 }
 
-
-// ---------------------------------------------------------
-// Vehicle seeding
-// ---------------------------------------------------------
-
-async function seedVehicles(vehicles = []) {
-    return upsertVehicles(vehicles);
-}
-
-function sqlString(value) {
-    if (value == null) return 'NULL';
-
-    return `'${String(value).replace(/'/g, "''")}'`;
-}
-
 async function upsertVehicles(vehicles = []) {
-    for (let i = 0; i < vehicles.length; i++) {
+    for (let i = 0; i < vehicles.length; i += 1) {
         const vehicle = vehicles[i];
 
+        if (!vehicle?.id) continue;
+
         await exec(`
-      INSERT INTO vehicles (id, data, position, updated_at)
-      VALUES (
-        ${sqlString(vehicle.id)},
-        ${sqlString(JSON.stringify(vehicle))}::JSON,
-        ${i},
-        now()
-      )
-      ON CONFLICT (id) DO UPDATE SET
-        data = EXCLUDED.data,
-        position = EXCLUDED.position,
-        updated_at = now()
-    `);
+            INSERT INTO vehicles (id, data, position, updated_at)
+            VALUES (
+                ${sqlString(vehicle.id)},
+                ${sqlString(JSON.stringify(vehicle))}::JSON,
+                ${i},
+                now()
+            )
+            ON CONFLICT (id) DO UPDATE SET
+                data = EXCLUDED.data,
+                position = EXCLUDED.position,
+                updated_at = now()
+        `);
     }
 
-    await persist();
+    if (vehicles.length) await persist();
+
     return vehicles.length;
 }
-
-
-// ---------------------------------------------------------
-// Telemetry ingestion
-// ---------------------------------------------------------
 
 async function ingestTelemetry(records = []) {
     if (!records.length) {
         return {
             received: 0,
             inserted: 0,
+            duplicates: 0,
+            invalid: 0,
         };
     }
 
-    const receivedAt = Date.now();
-
     let inserted = 0;
+    let invalid = 0;
 
-    for (
-        let start = 0;
-        start < records.length;
-        start += INGEST_CHUNK
-    ) {
-        const chunk = records.slice(
-            start,
-            start + INGEST_CHUNK
-        );
+    for (let start = 0; start < records.length; start += INGEST_CHUNK) {
+        const chunk = records.slice(start, start + INGEST_CHUNK);
+        const receivedAt = Date.now();
 
-        const values = chunk
-            .filter(
-                (packet) =>
-                    packet?.packetId &&
-                    packet?.vehicleId &&
-                    packet?.ts
-            )
-            .map((packet) => {
-                const quote = (value) =>
-                    `'${String(value)
-                        .replaceAll("'", "''")}'`;
+        const valid = chunk.filter((packet) => {
+            const ok =
+                packet?.packetId != null &&
+                packet?.packetId !== '' &&
+                packet?.vehicleId != null &&
+                packet?.vehicleId !== '' &&
+                Number.isFinite(Number(packet?.ts));
 
-                return `(
-                    ${quote(packet.packetId)},
-                    ${quote(packet.vehicleId)},
-                    epoch_ms(${Number(packet.ts)}),
-                    epoch_ms(${receivedAt}),
-                    ${Number(packet.lat ?? 0)},
-                    ${Number(packet.lng ?? 0)},
-                    ${Number(packet.speed ?? 0)},
-                    ${Number(packet.fuel ?? 0)},
-                    ${Number(packet.battery ?? 0)},
-                    ${Number(packet.engineTemp ?? 0)}
-                )`;
-            })
-            .join(',');
+            if (!ok) invalid += 1;
 
-        if (!values) {
-            continue;
-        }
+            return ok;
+        });
+
+        if (!valid.length) continue;
+
+        const values = valid.map((packet) => `(
+            ${sqlString(packet.packetId)},
+            ${sqlString(packet.vehicleId)},
+            ${sqlNumber(packet.seq)},
+            epoch_ms(${Math.trunc(Number(packet.ts))}),
+            epoch_ms(${receivedAt}),
+            ${sqlNumber(packet.lat)},
+            ${sqlNumber(packet.lng)},
+            ${sqlNumber(packet.speed)},
+            ${sqlNumber(packet.fuel)},
+            ${sqlNumber(packet.battery)},
+            ${sqlNumber(packet.batteryTemp ?? packet.battery_temp)},
+            ${sqlNumber(packet.engineTemp ?? packet.engine_temp)},
+            ${sqlString(JSON.stringify(packet))}::JSON
+        )`).join(',');
 
         const before = await query(`
             SELECT COUNT(*)::INTEGER AS count
@@ -449,6 +404,7 @@ async function ingestTelemetry(records = []) {
             INSERT INTO telemetry (
                 packet_id,
                 vehicle_id,
+                seq,
                 ts,
                 received_at,
                 lat,
@@ -456,12 +412,12 @@ async function ingestTelemetry(records = []) {
                 speed,
                 fuel,
                 battery,
-                engine_temp
+                battery_temp,
+                engine_temp,
+                payload
             )
             VALUES ${values}
-
-            ON CONFLICT (packet_id)
-            DO NOTHING
+            ON CONFLICT (packet_id) DO NOTHING
         `);
 
         const after = await query(`
@@ -469,59 +425,159 @@ async function ingestTelemetry(records = []) {
             FROM telemetry
         `);
 
-        inserted +=
-            after[0].count - before[0].count;
+        inserted += after[0].count - before[0].count;
     }
 
-    if (inserted > 0) {
-        await persist();
-    }
+    if (inserted > 0) await persist();
 
     return {
         received: records.length,
         inserted,
-        duplicates:
-            records.length - inserted,
+        duplicates: records.length - invalid - inserted,
+        invalid,
     };
 }
 
-
-// ---------------------------------------------------------
-// Latest fleet state
-// ---------------------------------------------------------
-
 async function listVehicles() {
     return query(`
-    SELECT
-      v.id,
-      v.data->>'name' AS name,
-      v.data->>'plate' AS plate,
-      v.data->>'driver' AS driver,
-      v.data->>'type' AS type,
-      v.position,
-      arg_max(t.lat, t.ts) AS lat,
-      arg_max(t.lng, t.ts) AS lng,
-      arg_max(t.speed, t.ts) AS speed,
-      arg_max(t.fuel, t.ts) AS fuel,
-      arg_max(t.battery, t.ts) AS battery,
-      arg_max(t.engine_temp, t.ts) AS engine_temp,
-      MAX(t.ts) AS telemetry_ts,
-      MAX(t.received_at) AS received_at
-    FROM vehicles v
-    LEFT JOIN telemetry t ON t.vehicle_id = v.id
-    GROUP BY v.id, v.data, v.position
-    ORDER BY v.position, v.id
-  `);
+        WITH latest AS (
+            SELECT
+                vehicle_id,
+
+                arg_max(lat, ts)
+                    FILTER (WHERE lat IS NOT NULL) AS lat,
+                arg_max(lng, ts)
+                    FILTER (WHERE lng IS NOT NULL) AS lng,
+                arg_max(speed, ts)
+                    FILTER (WHERE speed IS NOT NULL) AS speed,
+                arg_max(fuel, ts)
+                    FILTER (WHERE fuel IS NOT NULL) AS fuel,
+                arg_max(battery, ts)
+                    FILTER (WHERE battery IS NOT NULL) AS battery,
+                arg_max(battery_temp, ts)
+                    FILTER (WHERE battery_temp IS NOT NULL) AS battery_temp,
+                arg_max(engine_temp, ts)
+                    FILTER (WHERE engine_temp IS NOT NULL) AS engine_temp,
+
+                epoch_ms(arg_max(ts, ts)
+                    FILTER (WHERE lat IS NOT NULL)) AS lat_ts,
+                epoch_ms(arg_max(received_at, ts)
+                    FILTER (WHERE lat IS NOT NULL)) AS lat_received_at,
+
+                epoch_ms(arg_max(ts, ts)
+                    FILTER (WHERE lng IS NOT NULL)) AS lng_ts,
+                epoch_ms(arg_max(received_at, ts)
+                    FILTER (WHERE lng IS NOT NULL)) AS lng_received_at,
+
+                epoch_ms(arg_max(ts, ts)
+                    FILTER (WHERE speed IS NOT NULL)) AS speed_ts,
+                epoch_ms(arg_max(received_at, ts)
+                    FILTER (WHERE speed IS NOT NULL)) AS speed_received_at,
+
+                epoch_ms(arg_max(ts, ts)
+                    FILTER (WHERE fuel IS NOT NULL)) AS fuel_ts,
+                epoch_ms(arg_max(received_at, ts)
+                    FILTER (WHERE fuel IS NOT NULL)) AS fuel_received_at,
+
+                epoch_ms(arg_max(ts, ts)
+                    FILTER (WHERE battery IS NOT NULL)) AS battery_ts,
+                epoch_ms(arg_max(received_at, ts)
+                    FILTER (WHERE battery IS NOT NULL)) AS battery_received_at,
+
+                epoch_ms(arg_max(ts, ts)
+                    FILTER (WHERE battery_temp IS NOT NULL)) AS battery_temp_ts,
+                epoch_ms(arg_max(received_at, ts)
+                    FILTER (WHERE battery_temp IS NOT NULL)) AS battery_temp_received_at,
+
+                epoch_ms(arg_max(ts, ts)
+                    FILTER (WHERE engine_temp IS NOT NULL)) AS engine_temp_ts,
+                epoch_ms(arg_max(received_at, ts)
+                    FILTER (WHERE engine_temp IS NOT NULL)) AS engine_temp_received_at,
+
+                epoch_ms(max(ts)) AS telemetry_ts,
+                epoch_ms(max(received_at)) AS received_at,
+                arg_max(seq, ts) AS latest_seq
+
+            FROM telemetry
+            GROUP BY vehicle_id
+        )
+        SELECT
+            v.id,
+            v.data->>'name' AS name,
+            v.data->>'plate' AS plate,
+            v.data->>'driver' AS driver,
+            v.data->>'type' AS type,
+            v.data,
+            v.position,
+            l.* EXCLUDE (vehicle_id)
+        FROM vehicles v
+        LEFT JOIN latest l ON l.vehicle_id = v.id
+        ORDER BY v.position, v.id
+    `);
 }
 
-// ---------------------------------------------------------
-// Refresg fleet state
-// ---------------------------------------------------------
+async function getTelemetryHistory(vehicleId, limit = 20) {
+    const safeLimit = Math.max(
+        1,
+        Math.min(200, Math.trunc(Number(limit) || 20)),
+    );
+
+    return query(`
+        SELECT
+            packet_id AS id,
+            vehicle_id AS vehicleId,
+            seq,
+            epoch_ms(ts) AS ts,
+            epoch_ms(received_at) AS receivedAt,
+            lat,
+            lng,
+            speed,
+            fuel,
+            battery,
+            battery_temp AS batteryTemp,
+            engine_temp AS engineTemp,
+
+            (
+                (lat IS NOT NULL)::INTEGER +
+                (lng IS NOT NULL)::INTEGER +
+                (speed IS NOT NULL)::INTEGER +
+                (fuel IS NOT NULL)::INTEGER +
+                (battery IS NOT NULL)::INTEGER +
+                (battery_temp IS NOT NULL)::INTEGER +
+                (engine_temp IS NOT NULL)::INTEGER
+            ) AS signalCount,
+
+            (
+                (lat IS NULL)::INTEGER +
+                (lng IS NULL)::INTEGER +
+                (speed IS NULL)::INTEGER +
+                (fuel IS NULL)::INTEGER +
+                (battery IS NULL)::INTEGER +
+                (battery_temp IS NULL)::INTEGER +
+                (engine_temp IS NULL)::INTEGER
+            ) > 0 AS isPartial,
+
+            GREATEST(
+                0,
+                epoch_ms(received_at) - epoch_ms(ts)
+            ) AS deliveryDelayMs,
+
+            payload
+
+        FROM telemetry
+        WHERE vehicle_id = ${sqlString(vehicleId)}
+        ORDER BY ts DESC, received_at DESC
+        LIMIT ${safeLimit}
+    `);
+}
 
 async function refreshTelemetry(records = [], vehicles = []) {
-    await seedVehicles(vehicles);
+    await upsertVehicles(vehicles);
+
     await exec('DELETE FROM telemetry');
+
     await ingestTelemetry(records);
+
     await persist();
 
     return {
@@ -530,55 +586,19 @@ async function refreshTelemetry(records = [], vehicles = []) {
     };
 }
 
-async function getTelemetryHistory(vehicleId, limit = 20) {
-    return query(`
-    SELECT
-      packet_id AS id,
-      vehicle_id AS vehicleId,
-      seq,
-      ts,
-      received_at AS receivedAt,
-      lat,
-      lng,
-      speed,
-      fuel,
-      battery,
-      engine_temp AS engineTemp
-    FROM telemetry
-    WHERE vehicle_id = ${sqlString(vehicleId)}
-    ORDER BY ts DESC
-    LIMIT ${Number(limit)}
-  `);
-}
-
-// ---------------------------------------------------------
-// Repository
-// ---------------------------------------------------------
-
 const repository = {
     init: initDatabase,
-    seedVehicles,
     upsertVehicles,
     ingestTelemetry,
     listVehicles,
-    clearData,
+    getTelemetryHistory,
     refreshTelemetry,
-    getTelemetryHistory
 };
-
-
-// ---------------------------------------------------------
-// RPC
-// ---------------------------------------------------------
 
 let queue = Promise.resolve();
 
-self.onmessage = (event) => {
-    const {
-        id,
-        method,
-        args = [],
-    } = event.data;
+self.onmessage = ({ data }) => {
+    const { id, method, args = [] } = data;
 
     queue = queue.then(async () => {
         try {
@@ -589,9 +609,7 @@ self.onmessage = (event) => {
             const fn = repository[method];
 
             if (typeof fn !== 'function') {
-                throw new Error(
-                    `Unknown method: ${method}`
-                );
+                throw new Error(`Unknown method: ${method}`);
             }
 
             const result = await fn(...args);
@@ -606,18 +624,9 @@ self.onmessage = (event) => {
                 id,
                 ok: false,
                 error: {
-                    message:
-                        error?.message ||
-                        String(error),
+                    message: error?.message || String(error),
                 },
             });
         }
     });
 };
-
-async function clearData() {
-    await exec('DELETE FROM telemetry');
-    await persist();
-
-    return { success: true };
-}
