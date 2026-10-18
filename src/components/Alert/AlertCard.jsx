@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { StatusBadge } from '../Badge/StatusBadge';
 
-const AlertCard = ({ item, vehicleName, onAck }) => {
+const AlertCard = ({ item, vehicleName }) => {
     return (
         <article className={`attention-card severity-${item.severity}`}>
             <header>
@@ -15,11 +15,6 @@ const AlertCard = ({ item, vehicleName, onAck }) => {
                     {vehicleName ?? item.vehicleId}
                 </Link>
             </p>
-            {item.status === 'open' && onAck ? (
-                <button type="button" onClick={() => onAck(item.id)}>
-                    Acknowledge
-                </button>
-            ) : null}
         </article>
     );
 };

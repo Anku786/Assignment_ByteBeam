@@ -9,21 +9,22 @@ const VehicleDetail = () => {
     const { rows, status, attention, getTelemetryHistory } = useFleetData();
     const [history, setHistory] = useState([]);
     const vehicle = rows.find((row) => row.id === vehicleId);
-
     const events = useMemo(
         () =>
             attention
-                .filter((item) => item.id === vehicleId)
+                .filter((item) => item.vehicleId === vehicleId)
                 .slice(0, 12)
                 .map((item) => ({
-                    id: `${item.id}-${item.lastSeenAt}`,
-                    title: item.ruleId.replaceAll('_', ' '),
-                    detail: `${item.message} · ${item.status}`,
-                    severity: item.severity,
-                    timeLabel: formatTime(item.lastSeenAt),
+                    id: item.id,
+                    title: item.title ?? item.ruleId?.replaceAll('_', ' ') ?? 'Alert',
+                    detail: `${item.message ?? 'open'}`,
+                    severity: item.severity ?? item.level,
+                    timeLabel: item.lastSeenAt
+                        ? formatTime(item.lastSeenAt)
+                        : 'Current',
                 })),
         [attention, vehicleId],
-    )
+    );
 
     useEffect(() => {
         if (!vehicleId) return;
@@ -62,7 +63,7 @@ const VehicleDetail = () => {
                 <article><p>Speed</p><strong>{vehicle.speed != null ? `${Math.round(Number(vehicle.speed))} km/h` : '—'}</strong></article>
                 <article><p>Battery SOC</p><strong>{vehicle.battery != null ? `${Math.round(Number(vehicle.battery))}%` : '—'}</strong></article>
                 <article><p>Battery Temp</p><strong>{vehicle.battery_temp != null ? `${Number(vehicle.battery_temp).toFixed(1)}°C` : '—'}</strong></article>
-                <article><p>Ignition</p><strong>{vehicle.ignition ?? '—'}</strong></article>
+                <article><p>Ignition</p><strong>{vehicle?.speed == null ? '—' : vehicle.speed > 0 ? 'On' : 'Off'}</strong></article>
                 <article><p>Odometer</p><strong>{vehicle.odometer != null ? `${Number(vehicle.odometer).toLocaleString()} km` : '—'}</strong></article>
                 <article><p>GPS</p><strong>{vehicle.lat != null && vehicle.lng != null ? `${Number(vehicle.lat).toFixed(4)}, ${Number(vehicle.lng).toFixed(4)}` : '—'}</strong></article>
             </section>
@@ -71,11 +72,11 @@ const VehicleDetail = () => {
                 <section>
                     <h2>Current attention</h2>
                     {vehicle.openAlerts?.length ? (
-                        <ul>
+                        <ol className='timeline'>
                             {vehicle.openAlerts.map((alert) => (
-                                <li key={alert.id}>{alert.severity ?? alert.level}: {alert.message ?? alert.text}</li>
+                                <li className={`timeline-item severity-${alert.severity}`} key={alert.id}>{alert.severity ?? alert.level}: {alert.message ?? alert.text}</li>
                             ))}
-                        </ul>
+                        </ol>
                     ) : (
                         <p>No current alert from fresh readings.</p>
                     )}

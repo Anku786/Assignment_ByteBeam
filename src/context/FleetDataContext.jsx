@@ -29,15 +29,30 @@ function isFresh(signalState) {
     return signalState?.state === 'fresh';
 }
 
+
 function getAlerts(row) {
     const alerts = [];
-    const battery = Number(row.battery);
-    const batteryTemp = Number(row.battery_temp);
+
+    const hasValue = (value) =>
+        value !== null &&
+        value !== undefined &&
+        value !== '' &&
+        Number.isFinite(Number(value));
+
+    const battery = hasValue(row.battery) ? Number(row.battery) : null;
+    const batteryTemp = hasValue(row.battery_temp)
+        ? Number(row.battery_temp)
+        : null;
+    const engineTemp = hasValue(row.engine_temp)
+        ? Number(row.engine_temp)
+        : null;
+
     const batteryFresh = isFresh(row.signalFreshness?.battery);
     const batteryTempFresh = isFresh(row.signalFreshness?.batteryTemp);
+    const engineTempFresh = isFresh(row.signalFreshness?.engineTemp);
 
-    // Assignment rule: stale readings must not create or preserve current alerts.
-    if (batteryFresh && Number.isFinite(battery)) {
+    // Battery alerts
+    if (batteryFresh && battery !== null) {
         if (battery < 10) {
             alerts.push({
                 id: `${row.id}-battery-soc`,
@@ -61,20 +76,72 @@ function getAlerts(row) {
         }
     }
 
-    if (batteryTempFresh && Number.isFinite(batteryTemp) && batteryTemp > 45) {
+    // Battery temperature alerts
+    if (batteryTempFresh && batteryTemp !== null) {
+        if (batteryTemp > 45) {
+            alerts.push({
+                id: `${row.id}-battery-temperature`,
+                vehicleId: row.id,
+                level: 'crit',
+                severity: 'critical',
+                title: 'Battery overheating',
+                message: `Battery temperature is ${batteryTemp}°C.`,
+                text: `Battery temperature high (${batteryTemp}°C)`,
+            });
+        } else if (batteryTemp > 40) {
+            alerts.push({
+                id: `${row.id}-battery-temperature`,
+                vehicleId: row.id,
+                level: 'warn',
+                severity: 'warning',
+                title: 'High battery temperature',
+                message: `Battery temperature is ${batteryTemp}°C.`,
+                text: `Battery temperature elevated (${batteryTemp}°C)`,
+            });
+        }
+    }
+
+    // Engine temperature alerts
+    if (engineTempFresh && engineTemp !== null) {
+        if (engineTemp > 110) {
+            alerts.push({
+                id: `${row.id}-engine-temperature`,
+                vehicleId: row.id,
+                level: 'crit',
+                severity: 'critical',
+                title: 'Engine overheating',
+                message: `Engine temperature is ${engineTemp}°C.`,
+                text: `Engine temperature high (${engineTemp}°C)`,
+            });
+        } else if (engineTemp > 100) {
+            alerts.push({
+                id: `${row.id}-engine-temperature`,
+                vehicleId: row.id,
+                level: 'warn',
+                severity: 'warning',
+                title: 'High engine temperature',
+                message: `Engine temperature is ${engineTemp}°C.`,
+                text: `Engine temperature elevated (${engineTemp}°C)`,
+            });
+        }
+    }
+
+    // Connection alert: only for vehicles that have previously sent telemetry.
+    if (row.hasTelemetry && row.connection === 'offline') {
         alerts.push({
-            id: `${row.id}-battery-temperature`,
+            id: `${row.id}-connection`,
             vehicleId: row.id,
-            level: 'crit',
-            severity: 'critical',
-            title: 'Battery overheating',
-            message: `Battery temperature is ${batteryTemp}°C.`,
-            text: `Battery temperature high (${batteryTemp}°C)`,
+            level: 'warn',
+            severity: 'warning',
+            title: 'Vehicle offline',
+            message: `No recent telemetry received for ${row.name ?? row.id}.`,
+            text: 'Vehicle connection is offline',
         });
     }
 
     return alerts;
 }
+
 
 function deriveVehicleStatus(row) {
     const batteryFresh = isFresh(row.signalFreshness?.battery);

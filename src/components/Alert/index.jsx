@@ -4,34 +4,13 @@ import { useFleetData } from '../../context/FleetDataContext.jsx';
 
 const Alert = () => {
     const { rows = [] } = useFleetData();
-    const [acknowledged, setAcknowledged] = useState(() => new Set());
-    const [undoId, setUndoId] = useState(null);
 
     const alerts = useMemo(
         () => rows
             .flatMap((row) => row.openAlerts ?? [])
-            .filter((alert) => !acknowledged.has(alert.id)),
-        [rows, acknowledged],
+            .filter((alert) => alert.id),
+        [rows],
     );
-
-    const acknowledge = (id) => {
-        setAcknowledged((current) => {
-            const next = new Set(current);
-            next.add(id);
-            return next;
-        });
-        setUndoId(id);
-    };
-
-    const undo = () => {
-        if (!undoId) return;
-        setAcknowledged((current) => {
-            const next = new Set(current);
-            next.delete(undoId);
-            return next;
-        });
-        setUndoId(null);
-    };
 
     return (
         <div className="page">
@@ -43,13 +22,6 @@ const Alert = () => {
             </header>
 
             <h2>Open ({alerts.length})</h2>
-
-            {undoId ? (
-                <p className="attention-undo">
-                    Attention acknowledged.{' '}
-                    <button type="button" onClick={undo}>Undo</button>
-                </p>
-            ) : null}
 
             <div className="card-grid">
                 {alerts.length === 0 ? (
@@ -64,7 +36,6 @@ const Alert = () => {
                             key={item.id}
                             item={item}
                             vehicleName={row?.name ?? item.vehicleId}
-                            onAck={acknowledge}
                         />
                     );
                 })}
